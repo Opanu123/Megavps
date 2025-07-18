@@ -1,54 +1,77 @@
 name: Create VPS
 
-on: workflow_dispatch: repository_dispatch: types: [create-vps]
+on:
+  workflow_dispatch:
+    inputs:
+      vps_name:
+        description: "VPS Name"
+        required: false
+        default: "manual-vps"
+      backup:
+        description: "Restore previous backup?"
+        required: false
+        default: "false"
+  repository_dispatch:
+    types: [create-vps]
 
-jobs: start-vps: runs-on: ubuntu-latest timeout-minutes: 360
+jobs:
+  start-vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours
 
-env:
-  MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
-  MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v3
 
-steps:
-  - name: ⬇️ Checkout
-    uses: actions/checkout@v3
+      - name: 📁 Create dirs
+        run: mkdir -p links .backup
 
-  - name: 📁 Create dirs
-    run: mkdir -p links .backup
+      - name: 💾 Restore backup from MEGA
+        env:
+          MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          sudo apt update && sudo apt install -y megatools
+          name="${{ github.event.inputs.vps_name || 'manual-vps' }}"
+          if [ "${{ github.event.inputs.backup }}" = "true" ]; then
+            echo "📦 Restoring backup from MEGA..."
+            megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" > mega_files.txt
+            FILE_URL=$(megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" | grep "$name.zip" | awk '{print $3}')
+            if [ -n "$FILE_URL" ]; then
+              megadl --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" "$FILE_URL"
+              unzip "$name.zip" -d . || echo "❌ Failed to unzip"
+            else
+              echo "⚠️ No backup found for $name.zip"
+            fi
+          fi
 
-  - name: 💾 Restore backup from MEGA
-    run: |
-      sudo apt update && sudo apt install -y megatools unzip
-      megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" /vps_backups/ || true
-      megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" --download /vps_backups/vps_backup.zip || true
-      unzip vps_backup.zip -d . || echo "⚠️ No backup to restore."
+      - name: 🔐 Start tmate session
+        run: |
+          sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" > "links/${{ github.event.inputs.vps_name || 'manual-vps' }}.txt"
+          echo "✅ SSH Ready: $SSH"
+          sleep 60
 
-  - name: 🔐 Start tmate session
-    run: |
-      sudo apt update && sudo apt install -y tmate
-      tmate -S /tmp/tmate.sock new-session -d
-      tmate -S /tmp/tmate.sock wait tmate-ready
-      SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-      echo "$SSH" > "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
-      echo "✅ SSH Ready: $SSH"
-      sleep 60
+      - name: 📦 Save backup and upload to MEGA
+        env:
+          MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          sudo apt install -y megatools zip
+          name="${{ github.event.inputs.vps_name || 'manual-vps' }}"
+          zip -r "$name.zip" . -x ".git/*" ".github/*" ".backup/*"
+          megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" "$name.zip" || echo "❌ Failed to upload to MEGA"
 
-  - name: 📦 Save backup
-    run: |
-      zip -r vps_backup.zip . -x ".git/*" ".github/*" ".backup/*"
+      - name: 📤 Push backup info
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🔁 Updated backup for ${{ github.event.inputs.vps_name }}"
+          file_pattern: 'links/*.txt'
 
-  - name: 📤 Upload to MEGA
-    run: |
-      megarm /vps_backups/vps_backup.zip || true
-      megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" vps_backup.zip /vps_backups/
-
-  - name: 📤 Push to repo (SSH link)
-    uses: stefanzweifel/git-auto-commit-action@v5
-    with:
-      commit_message: "🔁 Updated SSH link for ${{ github.event.client_payload.vps_name || 'manual-vps' }}"
-      file_pattern: 'links/*.txt'
-
-  - name: ⏳ Keep session alive
-    run: |
-      echo "⏳ Keeping session alive for 6 hours..."
-      sleep $((360 * 60))
-
+      - name: ⏳ Keep session alive
+        run: |
+          echo "⏳ Keeping session alive for 6 hours..."
+          sleep $((360 * 60))
