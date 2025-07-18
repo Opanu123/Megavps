@@ -9,8 +9,8 @@ on:
         default: "manual-vps"
       backup:
         description: "Restore previous backup?"
-        required: false
-        default: "false"
+        required: true
+        default: "true"
   repository_dispatch:
     types: [create-vps]
 
