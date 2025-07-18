@@ -17,10 +17,6 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y tmate unzip openjdk-17-jre-headless megatools
-          curl -fsSL https://playit-cloud.github.io/ppa/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/playit.gpg
-          echo "deb [signed-by=/usr/share/keyrings/playit.gpg] https://playit-cloud.github.io/ppa/ ./" | sudo tee /etc/apt/sources.list.d/playit.list
-          sudo apt update
-          sudo apt install -y playit
 
       - name: Start tmate session
         run: |
@@ -42,14 +38,14 @@ jobs:
           MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
+          megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" /Root/plugins || true
           megaget --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" --path /Root/plugins/plugins.zip
           unzip -o plugins.zip -d minecraft/plugins
 
-      - name: Start Minecraft server with Playit tunnel
+      - name: Start Minecraft Server
         run: |
           cd minecraft
           nohup java -Xmx2G -Xms1G -jar server.jar nogui &
-          nohup playit &
 
       - name: Zip world and SSH link
         run: |
@@ -65,5 +61,5 @@ jobs:
 
       - name: Keep VPS alive for 6 hours
         run: |
-          echo "⏳ VPS running for 6 hours with Playit tunnel..."
+          echo "⏳ VPS running for 6 hours..."
           sleep $((6 * 60 * 60))
