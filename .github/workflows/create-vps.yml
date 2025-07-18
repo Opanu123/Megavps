@@ -17,7 +17,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours
+    timeout-minutes: 370  # Just a bit more than 6 hours
 
     steps:
       - name: ⬇️ Checkout
@@ -31,15 +31,14 @@ jobs:
           MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
         run: |
-          sudo apt update && sudo apt install -y megatools
+          sudo apt update && sudo apt install -y megatools unzip
           name="${{ github.event.inputs.vps_name || 'manual-vps' }}"
           if [ "${{ github.event.inputs.backup }}" = "true" ]; then
             echo "📦 Restoring backup from MEGA..."
-            megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" > mega_files.txt
             FILE_URL=$(megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" | grep "$name.zip" | awk '{print $3}')
             if [ -n "$FILE_URL" ]; then
               megadl --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" "$FILE_URL"
-              unzip "$name.zip" -d . || echo "❌ Failed to unzip"
+              unzip -o "$name.zip" -d . || echo "❌ Failed to unzip backup"
             else
               echo "⚠️ No backup found for $name.zip"
             fi
@@ -71,7 +70,16 @@ jobs:
           commit_message: "🔁 Updated backup for ${{ github.event.inputs.vps_name }}"
           file_pattern: 'links/*.txt'
 
-      - name: ⏳ Keep session alive
+      - name: ⏳ Keep session alive for 6 hours
         run: |
           echo "⏳ Keeping session alive for 6 hours..."
-          sleep $((360 * 60))
+          sleep $((6 * 60 * 60))
+
+      - name: 🔁 Trigger create-vps again
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -X POST https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "autovps", "backup": true}}'
