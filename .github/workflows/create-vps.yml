@@ -1,23 +1,28 @@
-name: auto-vps
+name: create-vps
 
 on:
-  schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
   workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'  # Auto start every 6 hours
 
 jobs:
-  setup-vps:
+  deploy:
     runs-on: ubuntu-latest
+
+    env:
+      MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
+      MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install tmate and dependencies
+      - name: Set up tools (tmate, megatools, zip)
         run: |
           sudo apt update
-          sudo apt install -y tmate unzip openjdk-17-jre-headless python3-pip
+          sudo apt install -y tmate zip megatools
 
-      - name: Start tmate session
+      - name: Start tmate SSH session
         run: |
           mkdir -p links
           tmate -S /tmp/tmate.sock new-session -d
@@ -25,35 +30,17 @@ jobs:
           tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' > links/ssh.txt
           cat links/ssh.txt
 
-      - name: Download and setup Minecraft server
+      - name: Keep VPS alive (6 hours) in background
         run: |
-          mkdir -p minecraft && cd minecraft
-          wget https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/196/downloads/paper-1.20.1-196.jar -O server.jar
-          echo "eula=true" > eula.txt
-          echo -e "motd=GitHub VPS Minecraft Server\nmax-players=10\nonline-mode=false" > server.properties
+          echo "⏳ VPS is live for 6 hours..."
+          (sleep 21600) &  # Sleep in background
+          wait
 
-      - name: Start Minecraft Server
+      - name: Zip folders for backup (optional: customize)
         run: |
-          cd minecraft
-          nohup java -Xmx2G -Xms1G -jar server.jar nogui &
+          zip -r backup.zip minecraft plugins links || echo "Nothing to zip"
 
-      - name: Zip world and ssh
+      - name: Upload backup to MEGA
         run: |
-          zip -r backup.zip minecraft links
-
-      - name: Install MEGA tools
-        run: |
-          sudo apt install -y megatools
-
-      - name: Upload to MEGA
-        env:
-          MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
-          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
-        run: |
-          megarm /Root/vps_backups/backup.zip || true
-          megaput --path /Root/vps_backups --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" backup.zip
-
-      - name: Keep VPS alive
-        run: |
-          echo "⏳ VPS running for 6 hours..."
-          sleep $((6 * 60 * 60))
+          megarm /vps_backups/backup.zip || true
+          megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" backup.zip /vps_backups/
