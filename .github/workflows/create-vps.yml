@@ -8,14 +8,19 @@ on:
 jobs:
   setup-vps:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Install tmate and dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y tmate unzip openjdk-17-jre-headless python3-pip
+          sudo apt install -y tmate unzip openjdk-17-jre-headless megatools
+          curl -fsSL https://playit-cloud.github.io/ppa/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/playit.gpg
+          echo "deb [signed-by=/usr/share/keyrings/playit.gpg] https://playit-cloud.github.io/ppa/ ./" | sudo tee /etc/apt/sources.list.d/playit.list
+          sudo apt update
+          sudo apt install -y playit
 
       - name: Start tmate session
         run: |
@@ -27,25 +32,30 @@ jobs:
 
       - name: Download and setup Minecraft server
         run: |
-          mkdir -p minecraft && cd minecraft
+          mkdir -p minecraft/plugins && cd minecraft
           wget https://api.papermc.io/v2/projects/paper/versions/1.20.1/builds/196/downloads/paper-1.20.1-196.jar -O server.jar
           echo "eula=true" > eula.txt
           echo -e "motd=GitHub VPS Minecraft Server\nmax-players=10\nonline-mode=false" > server.properties
 
-      - name: Start Minecraft Server
+      - name: Download plugins from MEGA
+        env:
+          MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
+          MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+        run: |
+          megaget --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" --path /Root/plugins/plugins.zip
+          unzip -o plugins.zip -d minecraft/plugins
+
+      - name: Start Minecraft server with Playit tunnel
         run: |
           cd minecraft
           nohup java -Xmx2G -Xms1G -jar server.jar nogui &
+          nohup playit &
 
-      - name: Zip world and ssh
+      - name: Zip world and SSH link
         run: |
           zip -r backup.zip minecraft links
 
-      - name: Install MEGA tools
-        run: |
-          sudo apt install -y megatools
-
-      - name: Upload to MEGA
+      - name: Upload world backup to MEGA
         env:
           MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
           MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
@@ -53,7 +63,7 @@ jobs:
           megarm /Root/vps_backups/backup.zip || true
           megaput --path /Root/vps_backups --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" backup.zip
 
-      - name: Keep VPS alive
+      - name: Keep VPS alive for 6 hours
         run: |
-          echo "⏳ VPS running for 6 hours..."
+          echo "⏳ VPS running for 6 hours with Playit tunnel..."
           sleep $((6 * 60 * 60))
