@@ -1,46 +1,54 @@
-name: create-vps
+name: Create VPS
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 */6 * * *'  # Auto start every 6 hours
+on: workflow_dispatch: repository_dispatch: types: [create-vps]
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
+jobs: start-vps: runs-on: ubuntu-latest timeout-minutes: 360
 
-    env:
-      MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
-      MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
+env:
+  MEGA_USERNAME: ${{ secrets.MEGA_USERNAME }}
+  MEGA_PASSWORD: ${{ secrets.MEGA_PASSWORD }}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+steps:
+  - name: ⬇️ Checkout
+    uses: actions/checkout@v3
 
-      - name: Set up tools (tmate, megatools, zip)
-        run: |
-          sudo apt update
-          sudo apt install -y tmate zip megatools
+  - name: 📁 Create dirs
+    run: mkdir -p links .backup
 
-      - name: Start tmate SSH session
-        run: |
-          mkdir -p links
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' > links/ssh.txt
-          cat links/ssh.txt
+  - name: 💾 Restore backup from MEGA
+    run: |
+      sudo apt update && sudo apt install -y megatools unzip
+      megals --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" /vps_backups/ || true
+      megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" --download /vps_backups/vps_backup.zip || true
+      unzip vps_backup.zip -d . || echo "⚠️ No backup to restore."
 
-      - name: Keep VPS alive (6 hours) in background
-        run: |
-          echo "⏳ VPS is live for 6 hours..."
-          (sleep 21600) &  # Sleep in background
-          wait
+  - name: 🔐 Start tmate session
+    run: |
+      sudo apt update && sudo apt install -y tmate
+      tmate -S /tmp/tmate.sock new-session -d
+      tmate -S /tmp/tmate.sock wait tmate-ready
+      SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+      echo "$SSH" > "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+      echo "✅ SSH Ready: $SSH"
+      sleep 60
 
-      - name: Zip folders for backup (optional: customize)
-        run: |
-          zip -r backup.zip minecraft plugins links || echo "Nothing to zip"
+  - name: 📦 Save backup
+    run: |
+      zip -r vps_backup.zip . -x ".git/*" ".github/*" ".backup/*"
 
-      - name: Upload backup to MEGA
-        run: |
-          megarm /vps_backups/backup.zip || true
-          megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" backup.zip /vps_backups/
+  - name: 📤 Upload to MEGA
+    run: |
+      megarm /vps_backups/vps_backup.zip || true
+      megaput --username "$MEGA_USERNAME" --password "$MEGA_PASSWORD" vps_backup.zip /vps_backups/
+
+  - name: 📤 Push to repo (SSH link)
+    uses: stefanzweifel/git-auto-commit-action@v5
+    with:
+      commit_message: "🔁 Updated SSH link for ${{ github.event.client_payload.vps_name || 'manual-vps' }}"
+      file_pattern: 'links/*.txt'
+
+  - name: ⏳ Keep session alive
+    run: |
+      echo "⏳ Keeping session alive for 6 hours..."
+      sleep $((360 * 60))
+
