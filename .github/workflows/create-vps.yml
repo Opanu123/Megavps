@@ -17,7 +17,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 370  # Just a bit more than 6 hours
+    timeout-minutes: 370  # 6 hours + buffer
 
     steps:
       - name: ⬇️ Checkout
@@ -73,13 +73,14 @@ jobs:
       - name: ⏳ Keep session alive for 6 hours
         run: |
           echo "⏳ Keeping session alive for 6 hours..."
-          sleep $((6 * 60 * 60))
+          sleep $((6 * 60 * 60))  # 21600 seconds
 
-      - name: 🔁 Trigger create-vps again
+      - name: 🔁 Auto-retrigger VPS
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}  # ⬅️ You must create this secret with a Personal Access Token
         run: |
+          echo "🔁 Triggering next VPS cycle..."
           curl -X POST https://api.github.com/repos/${{ github.repository }}/dispatches \
-            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github.v3+json" \
             -d '{"event_type": "create-vps", "client_payload": {"vps_name": "autovps", "backup": true}}'
